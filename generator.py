@@ -1,3 +1,73 @@
+import io
+from PIL import Image, ImageDraw, ImageFont
+
+# ==============================================================================
+# 1. СЕРТИФИКАТ ДИЛЕРА
+# ==============================================================================
+CERT_TEMPLATE_PATH = "cert_template.png"
+
+FONT_FILE_SERIF = "times.ttf"
+FONT_FILE_SANS = "arial.ttf"
+FONT_FILE_BOLD = "arialbd.ttf"
+
+SIZE_CERT_NUM = 42
+SIZE_COMPANY  = 52
+SIZE_INN      = 38
+SIZE_DATE     = 40
+
+COLOR_CERT_NUM = (110, 128, 150)
+COLOR_MAIN     = (27, 46, 75)
+
+Y_CERT_NUM = 242
+Y_COMPANY  = 445
+Y_INN      = 560
+Y_DATE     = 893
+X_DATE     = 970
+
+def generate_certificate(
+    cert_num: str,
+    company_name: str,
+    inn: str,
+    valid_until: str
+) -> tuple[io.BytesIO, io.BytesIO]:
+    """Генерация сертификата дилера"""
+    image = Image.open(CERT_TEMPLATE_PATH).convert("RGB")
+    draw = ImageDraw.Draw(image)
+    width, _ = image.size
+
+    font_num = ImageFont.truetype(FONT_FILE_SERIF, size=SIZE_CERT_NUM)
+    font_company = ImageFont.truetype(FONT_FILE_SANS, size=SIZE_COMPANY)
+    font_inn = ImageFont.truetype(FONT_FILE_SANS, size=SIZE_INN)
+    font_date = ImageFont.truetype(FONT_FILE_BOLD, size=SIZE_DATE)
+
+    clean_num = cert_num.strip()
+    if not clean_num.startswith("№"):
+        clean_num = f"№{clean_num}"
+    draw.text((width / 2, Y_CERT_NUM), clean_num, font=font_num, fill=COLOR_CERT_NUM, anchor="mm")
+    draw.text((width / 2, Y_COMPANY), company_name.strip(), font=font_company, fill=COLOR_MAIN, anchor="mm")
+
+    clean_inn = inn.strip()
+    if not clean_inn.upper().startswith("ИНН"):
+        clean_inn = f"ИНН:{clean_inn}"
+    draw.text((width / 2, Y_INN), clean_inn, font=font_inn, fill=COLOR_MAIN, anchor="mm")
+    draw.text((X_DATE, Y_DATE), valid_until.strip(), font=font_date, fill=COLOR_MAIN, anchor="lm")
+
+    jpg_buf = io.BytesIO()
+    image.save(jpg_buf, format="JPEG", quality=95)
+    jpg_buf.seek(0)
+
+    pdf_buf = io.BytesIO()
+    image.save(pdf_buf, format="PDF", resolution=150.0)
+    pdf_buf.seek(0)
+
+    return jpg_buf, pdf_buf
+
+
+# ==============================================================================
+# 2. ДОВЕРЕННОСТЬ М-2
+# ==============================================================================
+DOV_TEMPLATE_PATH = "doverennost_template.png"
+
 def generate_doverennost(
     number: str,
     date_issue: str,
@@ -11,7 +81,7 @@ def generate_doverennost(
     bill_info: str,
     items: list[tuple[str, str, str]]
 ) -> tuple[io.BytesIO, io.BytesIO]:
-    """Генерация доверенности М-2 с точным позиционированием всех полей"""
+    """Генерация доверенности М-2 с выверенными центрами ячеек"""
     image = Image.open(DOV_TEMPLATE_PATH).convert("RGB")
     draw = ImageDraw.Draw(image)
 
@@ -21,24 +91,19 @@ def generate_doverennost(
     font_table_default = ImageFont.truetype(FONT_FILE_SANS, size=21)
     COLOR_BLACK = (0, 0, 0)
 
-    # 1. Отрывной корешок (слева вверху) — центрирование строго внутри ячеек
+    # 1. Отрывной корешок (слева вверху) — центры колонок: 184, 360, 551, 906
     draw.text((184, 205), number.strip(), font=font_main, fill=COLOR_BLACK, anchor="mm")
     draw.text((360, 205), date_issue.strip(), font=font_main, fill=COLOR_BLACK, anchor="mm")
     draw.text((551, 205), date_valid.strip(), font=font_main, fill=COLOR_BLACK, anchor="mm")
     draw.text((906, 205), fio.strip(), font=font_small, fill=COLOR_BLACK, anchor="mm")
     draw.text((311, 342), supplier.strip(), font=font_main, fill=COLOR_BLACK, anchor="mm")
 
-    # 2. Основная часть
+    # 2. Основная часть (шапка и реквизиты)
     draw.text((750, 545), 'ООО "ПК МИШКА"', font=font_main, fill=COLOR_BLACK, anchor="mm")
-
-    # Номер на подчеркивании после "ДОВЕРЕННОСТЬ №"
+    # Номер смещен правее слова "ДОВЕРЕННОСТЬ №"
     draw.text((720, 625), number.strip(), font=font_bold, fill=COLOR_BLACK, anchor="lm")
-
-    # Даты выдачи и срока действия
     draw.text((475, 672), date_issue.strip(), font=font_main, fill=COLOR_BLACK, anchor="lm")
     draw.text((475, 703), date_valid.strip(), font=font_main, fill=COLOR_BLACK, anchor="lm")
-
-    # Сотрудник
     draw.text((900, 965), fio.strip(), font=font_main, fill=COLOR_BLACK, anchor="lm")
 
     # Паспортные данные
@@ -47,23 +112,23 @@ def generate_doverennost(
     draw.text((430, 1038), passport_issued_by.strip(), font=font_small, fill=COLOR_BLACK, anchor="lm")
     draw.text((430, 1068), passport_date.strip(), font=font_main, fill=COLOR_BLACK, anchor="lm")
 
-    # Поставщик и документ
+    # Поставщик и основание
     draw.text((430, 1108), supplier.strip(), font=font_main, fill=COLOR_BLACK, anchor="lm")
     draw.text((430, 1138), bill_info.strip(), font=font_main, fill=COLOR_BLACK, anchor="lm")
 
-    # 3. Таблица товаров (строки 1, 2, 3, 4)
+    # 3. Таблица товаров (координаты строк строго по центру)
     row_centers_y = [1416, 1444, 1472, 1500]
 
-    COL_NAME_X = 225     # Отступ в ячейке наименования
-    COL_UNIT_X = 999     # Центр ячейки единицы измерения
-    COL_QTY_X = 1263     # Центр ячейки количества
+    COL_NAME_X = 225     # Отступ в графе наименования
+    COL_UNIT_X = 999     # Центр колонки единиц измерения
+    COL_QTY_X = 1263     # Центр колонки количества
     MAX_NAME_WIDTH = 680
 
     for idx, item in enumerate(items[:4]):
         name, unit, qty = item
         y = row_centers_y[idx]
 
-        # Автоподбор кегля шрифта под длину наименования
+        # Автоподбор размера шрифта под длину текста
         font_name = font_table_default
         name_str = name.strip()
         font_size = 21
@@ -71,7 +136,7 @@ def generate_doverennost(
             font_size -= 1
             font_name = ImageFont.truetype(FONT_FILE_SANS, size=font_size)
 
-        # Колонка 1 не заполняется (номера уже напечатаны на бланке)
+        # Номера строк не рисуем (1, 2, 3, 4 уже присутствуют на бланке)
         draw.text((COL_NAME_X, y), name_str, font=font_name, fill=COLOR_BLACK, anchor="lm")
         draw.text((COL_UNIT_X, y), unit.strip(), font=font_table_default, fill=COLOR_BLACK, anchor="mm")
         draw.text((COL_QTY_X, y), str(qty).strip(), font=font_table_default, fill=COLOR_BLACK, anchor="mm")
