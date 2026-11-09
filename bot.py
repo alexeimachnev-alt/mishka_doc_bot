@@ -26,7 +26,7 @@ RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
 bot = Bot(token=BOT_TOKEN or "dummy_token")
 dp = Dispatcher()
 
-# Главное меню
+# Главное меню с кнопками
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📄 Создать Сертификат"), KeyboardButton(text="📝 Создать Доверенность М-2")],
@@ -35,12 +35,14 @@ main_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# 1. Состояния для Сертификата
 class CertForm(StatesGroup):
     number = State()
     company = State()
     inn = State()
     date = State()
 
+# 2. Состояния для Доверенности М-2
 class DovForm(StatesGroup):
     number = State()
     date_valid = State()
@@ -50,28 +52,38 @@ class DovForm(StatesGroup):
     passport_data = State()
     items = State()
 
+# 3. Состояния для Дилерского договора (поступательное заполнение)
+class ContractForm(StatesGroup):
+    number = State()
+    date = State()
+    dealer_name = State()
+    preamble = State()
+    fio_short = State()
+    address = State()
+    inn_kpp = State()
+    bank_details = State()
+    phone = State()
+
 
 # ==============================================================================
-# СТАРТ И МЕНЮ
+# СТАРТ И ГЛАВНОЕ МЕНЮ
 # ==============================================================================
 @dp.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
         "👋 **Генератор документов ООО «ПК МИШКА»**\n\n"
-        "Выберите действие в меню внизу:\n"
+        "Выберите нужный документ кнопкой внизу:\n"
         "• **«📄 Создать Сертификат»**\n"
         "• **«📝 Создать Доверенность М-2»**\n"
         "• **«📑 Оформить Дилерский договор»**\n\n"
-        "💡 *Быстрые команды для создания в 1 строку:*\n"
-        "`/dov` — Доверенность\n"
-        "`/dogovor` — Дилерский договор",
+        "Все документы заполняются пошагово с удобными подсказками.",
         reply_markup=main_keyboard
     )
 
 
 # ==============================================================================
-# 1. СЕРТИФИКАТ ДИЛЕРА
+# 1. СЕРТИФИКАТ ДИЛЕРА (ПОШАГОВО)
 # ==============================================================================
 @dp.message(F.text == "📄 Создать Сертификат")
 @dp.message(Command("cert"))
@@ -121,40 +133,26 @@ async def cert_date(message: Message, state: FSMContext):
 
 
 # ==============================================================================
-# 2. ДОВЕРЕННОСТЬ М-2
+# 2. ДОВЕРЕННОСТЬ М-2 (ПОШАГОВО И БЫСТРО)
 # ==============================================================================
 @dp.message(Command("dov"))
 async def quick_dov(message: Message):
     text = message.text.replace("/dov", "").strip()
     if not text:
         await message.answer(
-            "📋 **Создание доверенности М-2 в одну строку**\n\n"
-            "Формат команды через `|` (товары разделяются `;`):\n"
-            "```text\n"
-            "/dov Номер | СрокПо | ФИО | Поставщик | Счет | Серия | НомерПаспорта | КемВыдан | ДатаВыдачи | Товар 1 : шт : 10 ; Товар 2 : шт : 20\n"
-            "```\n\n"
-            "*Пример готовой команды:*\n"
-            "`/dov 7 | 13.11.2026 | Мачнев Алексей Игоревич | ООО СДВ ИНЖИНИРИНГ | счету №1488 от 09.11.2026 | 45 14 | 160544 | ГУ МВД ГОРОДА МОСКВЫ | 13.05.2013 | Лестница приставная 08 ступ : шт : 100 ; Заглушка 54 синяя : шт : 400`",
+            "📋 **Создание доверенности М-2**\n"
+            "Нажмите кнопку внизу или отправьте данные одной строкой через `|`:\n"
+            "`/dov 7 | 13.11.2026 | Мачнев Алексей Игоревич | ООО СДВ ИНЖИНИРИНГ | счету №1488 от 09.11.2026 | 45 14 | 160544 | ГУ МВД ГОРОДА МОСКВЫ | 13.05.2013 | Лестница : шт : 100 ; Заглушка : шт : 400`",
             reply_markup=main_keyboard
         )
         return
 
     parts = [p.strip() for p in text.split("|")]
     if len(parts) < 9:
-        await message.answer("⚠️ Не хватает данных. Проверьте разделители `|` (должно быть минимум 9 полей).")
+        await message.answer("⚠️ Не хватает данных. Проверьте разделители `|` (минимум 9 полей).")
         return
 
-    num = parts[0]
-    date_valid = parts[1]
-    fio = parts[2]
-    supplier = parts[3]
-    bill_info = parts[4]
-    p_series = parts[5]
-    p_num = parts[6]
-    p_by = parts[7]
-    p_date = parts[8]
     date_issue = datetime.datetime.now().strftime("%d.%m.%Y")
-
     items = []
     if len(parts) >= 10:
         raw_items = [x for x in parts[9].replace(";", "\n").split("\n") if x.strip()]
@@ -168,23 +166,23 @@ async def quick_dov(message: Message):
     await message.answer("⏳ Создаю доверенность...")
 
     img_buf, pdf_buf = generate_doverennost(
-        number=num,
+        number=parts[0],
         date_issue=date_issue,
-        date_valid=date_valid,
-        fio=fio,
-        supplier=supplier,
-        passport_series=p_series,
-        passport_number=p_num,
-        passport_issued_by=p_by,
-        passport_date=p_date,
-        bill_info=bill_info,
+        date_valid=parts[1],
+        fio=parts[2],
+        supplier=parts[3],
+        passport_series=parts[5],
+        passport_number=parts[6],
+        passport_issued_by=parts[7],
+        passport_date=parts[8],
+        bill_info=parts[4],
         items=items
     )
 
     photo_file = BufferedInputFile(img_buf.getvalue(), filename="doverennost.jpg")
-    await message.answer_photo(photo_file, caption=f"✅ Доверенность №{num} готова!", reply_markup=main_keyboard)
+    await message.answer_photo(photo_file, caption=f"✅ Доверенность №{parts[0]} готова!", reply_markup=main_keyboard)
 
-    pdf_file = BufferedInputFile(pdf_buf.getvalue(), filename=f"Доверенность_№{num}.pdf")
+    pdf_file = BufferedInputFile(pdf_buf.getvalue(), filename=f"Доверенность_№{parts[0]}.pdf")
     await message.answer_document(pdf_file)
 
 
@@ -209,7 +207,7 @@ async def dov_step_date(message: Message, state: FSMContext):
 @dp.message(DovForm.fio)
 async def dov_step_fio(message: Message, state: FSMContext):
     await state.update_data(fio=message.text.strip())
-    await message.answer("Шаг 4 из 6: Введите **поставщика** (например: `ООО СДВ ИНЖИНИРИНГ`):")
+    await message.answer("Шаг 4 из 6: Введите **название поставщика** (например: `ООО СДВ ИНЖИНИРИНГ`):")
     await state.set_state(DovForm.supplier)
 
 @dp.message(DovForm.supplier)
@@ -287,53 +285,135 @@ async def dov_step_items(message: Message, state: FSMContext):
 
 
 # ==============================================================================
-# 3. ДИЛЕРСКИЙ ДОГОВОР
+# 3. ДИЛЕРСКИЙ ДОГОВОР (ПОСТУПАТЕЛЬНОЕ ЗАПОЛНЕНИЕ)
 # ==============================================================================
 @dp.message(F.text == "📑 Оформить Дилерский договор")
 @dp.message(Command("dogovor"))
-async def cmd_dogovor(message: Message):
-    text = message.text.replace("/dogovor", "").replace("📑 Оформить Дилерский договор", "").strip()
+async def start_contract_step(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "📑 **Оформление Дилерского договора (по шагам)**\n\n"
+        "Шаг 1 из 7: Введите **номер договора** (например: `23940`):",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    await state.set_state(ContractForm.number)
 
-    if not text:
-        await message.answer(
-            "📑 **Генерация 11-страничного Дилерского договора**\n\n"
-            "Отправьте данные Дилера через разделитель `|`:\n\n"
-            "```text\n"
-            "/dogovor Номер | Дата | Название Дилера | Преамбула (в лице кого и на основании чего) | ФИО Директора (кратко) | Юр.адрес | ИНН/КПП | Р/счет | Корр.счет | Банк | БИК | Телефон\n"
-            "```\n\n"
-            "*Пример готовой команды:*\n"
-            "`/dogovor 23940 | 10 ноября 2026 г. | ООО «Мосводопром» | в лице Генерального директора Иванова И.И., действующего на основании Устава | Иванов И.И. | 111524, г. Москва, ул. Электродная, д. 11 | 7721023832/772101001 | 40702810438710002682 | 30101810400000000225 | ПАО Сбербанк | 044525225 | +7(910)009-00-65`",
-            reply_markup=main_keyboard
-        )
-        return
+@dp.message(ContractForm.number)
+async def contract_step_num(message: Message, state: FSMContext):
+    await state.update_data(number=message.text.strip())
+    # Предлагаем текущую дату или ручной ввод
+    today_str = datetime.datetime.now().strftime("«%d» %m %Y г.")
+    await message.answer(
+        f"Шаг 2 из 7: Введите **дату договора** (или отправьте `сегодня` для даты {today_str}):\n\n"
+        "*Пример:* `«10» ноября 2026 г.`"
+    )
+    await state.set_state(ContractForm.date)
 
-    parts = [p.strip() for p in text.split("|")]
-    if len(parts) < 12:
-        await message.answer("⚠️ Не хватает данных. Проверьте, чтобы было 12 полей через символ `|`.")
-        return
+@dp.message(ContractForm.date)
+async def contract_step_date(message: Message, state: FSMContext):
+    d_text = message.text.strip()
+    if d_text.lower() == "сегодня":
+        d_text = datetime.datetime.now().strftime("«%d» %m %Y г.")
+    await state.update_data(date=d_text)
+    
+    await message.answer(
+        "Шаг 3 из 7: Введите **полное наименование компании Дилера / Покупателя**:\n\n"
+        "*Пример:* `ООО «Мосводопром»` или `ИП Иванов Иван Иванович`"
+    )
+    await state.set_state(ContractForm.dealer_name)
 
-    await message.answer("⏳ Формирую 11-страничный договор...")
+@dp.message(ContractForm.dealer_name)
+async def contract_step_name(message: Message, state: FSMContext):
+    await state.update_data(dealer_name=message.text.strip())
+    await message.answer(
+        "Шаг 4 из 7: Введите **должность, ФИО руководителя и основание** (для первой страницы):\n\n"
+        "*Пример:* `в лице Генерального директора Иванова И.И., действующего на основании Устава`"
+    )
+    await state.set_state(ContractForm.preamble)
+
+@dp.message(ContractForm.preamble)
+async def contract_step_preamble(message: Message, state: FSMContext):
+    await state.update_data(preamble=message.text.strip())
+    await message.answer(
+        "Шаг 5 из 7: Введите **фамилию и инициалы руководителя для подписи**:\n\n"
+        "*Пример:* `Иванов И.И.`"
+    )
+    await state.set_state(ContractForm.fio_short)
+
+@dp.message(ContractForm.fio_short)
+async def contract_step_fio(message: Message, state: FSMContext):
+    await state.update_data(fio_short=message.text.strip())
+    await message.answer(
+        "Шаг 6 из 7: Введите **юридический адрес** и **ИНН/КПП** (через символ `/` или с новой строки):\n\n"
+        "*Пример:*\n"
+        "111524, г. Москва, ул. Электродная, д. 11\n"
+        "7721023832 / 772101001"
+    )
+    await state.set_state(ContractForm.address)
+
+@dp.message(ContractForm.address)
+async def contract_step_addr(message: Message, state: FSMContext):
+    lines = [l.strip() for l in message.text.split("\n") if l.strip()]
+    if len(lines) >= 2:
+        addr = lines[0]
+        inn_kpp = lines[1]
+    else:
+        # Если введено одной строкой через запятую
+        parts = message.text.split(",")
+        addr = ",".join(parts[:-1]).strip() if len(parts) > 1 else parts[0].strip()
+        inn_kpp = parts[-1].strip() if len(parts) > 1 else "—"
+
+    await state.update_data(address=addr, inn_kpp=inn_kpp)
+    await message.answer(
+        "Шаг 7 из 7: Введите **банковские реквизиты и телефон** (каждый пункт с новой строки):\n\n"
+        "1. Расчетный счет\n"
+        "2. Корр. счет\n"
+        "3. Название банка\n"
+        "4. БИК\n"
+        "5. Телефон\n\n"
+        "*Пример:*\n"
+        "40702810438710002682\n"
+        "30101810400000000225\n"
+        "ПАО Сбербанк\n"
+        "044525225\n"
+        "+7(910)009-00-65"
+    )
+    await state.set_state(ContractForm.bank_details)
+
+@dp.message(ContractForm.bank_details)
+async def contract_step_finish(message: Message, state: FSMContext):
+    lines = [l.strip() for l in message.text.split("\n") if l.strip()]
+    rs = lines[0] if len(lines) > 0 else "—"
+    ks = lines[1] if len(lines) > 1 else "—"
+    bank = lines[2] if len(lines) > 2 else "—"
+    bik = lines[3] if len(lines) > 3 else "—"
+    phone = lines[4] if len(lines) > 4 else "—"
+
+    data = await state.get_data()
+    await state.clear()
+
+    await message.answer("⏳ Создаю 11-страничный Дилерский договор...", reply_markup=main_keyboard)
 
     try:
         pdf_buf = generate_diler_contract(
-            contract_num=parts[0],
-            contract_date=parts[1],
-            dealer_name=parts[2],
-            dealer_preamble=parts[3],
-            dealer_fio_short=parts[4],
-            dealer_address=parts[5],
-            dealer_inn_kpp=parts[6],
-            dealer_rs=parts[7],
-            dealer_ks=parts[8],
-            dealer_bank=parts[9],
-            dealer_bik=parts[10],
-            dealer_phone=parts[11]
+            contract_num=data["number"],
+            contract_date=data["date"],
+            dealer_name=data["dealer_name"],
+            dealer_preamble=data["preamble"],
+            dealer_fio_short=data["fio_short"],
+            dealer_address=data["address"],
+            dealer_inn_kpp=data["inn_kpp"],
+            dealer_rs=rs,
+            dealer_ks=ks,
+            dealer_bank=bank,
+            dealer_bik=bik,
+            dealer_phone=phone
         )
 
-        doc_file = BufferedInputFile(pdf_buf.getvalue(), filename=f"Дилерский_договор_№{parts[0]}_{parts[2]}.pdf")
-        await message.answer_document(doc_file, caption=f"✅ Дилерский договор №{parts[0]} готов во всех 11 страницах!")
+        doc_file = BufferedInputFile(pdf_buf.getvalue(), filename=f"Дилерский_договор_№{data['number']}_{data['dealer_name']}.pdf")
+        await message.answer_document(doc_file, caption=f"✅ Дилерский договор №{data['number']} успешно оформлен во всех 11 страницах!")
     except Exception as e:
-        await message.answer(f"❌ Ошибка при формировании договора: {e}")
+        await message.answer(f"❌ Ошибка при формировании договора: {e}", reply_markup=main_keyboard)
 
 
 # ==============================================================================
