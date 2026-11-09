@@ -1,5 +1,14 @@
 import io
 from PIL import Image, ImageDraw, ImageFont
+import pypdf
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+# Регистрируем шрифты для векторной накладки ReportLab
+pdfmetrics.registerFont(TTFont("Arial", "arial.ttf"))
+pdfmetrics.registerFont(TTFont("Arial-Bold", "arialbd.ttf"))
 
 # ==============================================================================
 # 1. СЕРТИФИКАТ ДИЛЕРА
@@ -10,47 +19,32 @@ FONT_FILE_SERIF = "times.ttf"
 FONT_FILE_SANS = "arial.ttf"
 FONT_FILE_BOLD = "arialbd.ttf"
 
-SIZE_CERT_NUM = 42
-SIZE_COMPANY  = 52
-SIZE_INN      = 38
-SIZE_DATE     = 40
-
-COLOR_CERT_NUM = (110, 128, 150)
-COLOR_MAIN     = (27, 46, 75)
-
-Y_CERT_NUM = 242
-Y_COMPANY  = 445
-Y_INN      = 560
-Y_DATE     = 893
-X_DATE     = 970
-
 def generate_certificate(
     cert_num: str,
     company_name: str,
     inn: str,
     valid_until: str
 ) -> tuple[io.BytesIO, io.BytesIO]:
-    """Генерация сертификата дилера"""
     image = Image.open(CERT_TEMPLATE_PATH).convert("RGB")
     draw = ImageDraw.Draw(image)
     width, _ = image.size
 
-    font_num = ImageFont.truetype(FONT_FILE_SERIF, size=SIZE_CERT_NUM)
-    font_company = ImageFont.truetype(FONT_FILE_SANS, size=SIZE_COMPANY)
-    font_inn = ImageFont.truetype(FONT_FILE_SANS, size=SIZE_INN)
-    font_date = ImageFont.truetype(FONT_FILE_BOLD, size=SIZE_DATE)
+    font_num = ImageFont.truetype(FONT_FILE_SERIF, size=42)
+    font_company = ImageFont.truetype(FONT_FILE_SANS, size=52)
+    font_inn = ImageFont.truetype(FONT_FILE_SANS, size=38)
+    font_date = ImageFont.truetype(FONT_FILE_BOLD, size=40)
 
     clean_num = cert_num.strip()
     if not clean_num.startswith("№"):
         clean_num = f"№{clean_num}"
-    draw.text((width / 2, Y_CERT_NUM), clean_num, font=font_num, fill=COLOR_CERT_NUM, anchor="mm")
-    draw.text((width / 2, Y_COMPANY), company_name.strip(), font=font_company, fill=COLOR_MAIN, anchor="mm")
+    draw.text((width / 2, 242), clean_num, font=font_num, fill=(110, 128, 150), anchor="mm")
+    draw.text((width / 2, 445), company_name.strip(), font=font_company, fill=(27, 46, 75), anchor="mm")
 
     clean_inn = inn.strip()
     if not clean_inn.upper().startswith("ИНН"):
         clean_inn = f"ИНН:{clean_inn}"
-    draw.text((width / 2, Y_INN), clean_inn, font=font_inn, fill=COLOR_MAIN, anchor="mm")
-    draw.text((X_DATE, Y_DATE), valid_until.strip(), font=font_date, fill=COLOR_MAIN, anchor="lm")
+    draw.text((width / 2, 560), clean_inn, font=font_inn, fill=(27, 46, 75), anchor="mm")
+    draw.text((970, 893), valid_until.strip(), font=font_date, fill=(27, 46, 75), anchor="lm")
 
     jpg_buf = io.BytesIO()
     image.save(jpg_buf, format="JPEG", quality=95)
@@ -64,7 +58,7 @@ def generate_certificate(
 
 
 # ==============================================================================
-# 2. ДОВЕРЕННОСТЬ М-2
+# 2. ДОВЕРЕННОСТЬ М-2 (ТОЧНЫЕ КООРДИНАТЫ ЯЧЕЕК И ШАПКИ)
 # ==============================================================================
 DOV_TEMPLATE_PATH = "doverennost_template.png"
 
@@ -81,7 +75,6 @@ def generate_doverennost(
     bill_info: str,
     items: list[tuple[str, str, str]]
 ) -> tuple[io.BytesIO, io.BytesIO]:
-    """Генерация доверенности М-2 с выверенными центрами ячеек"""
     image = Image.open(DOV_TEMPLATE_PATH).convert("RGB")
     draw = ImageDraw.Draw(image)
 
@@ -116,7 +109,7 @@ def generate_doverennost(
     draw.text((430, 1108), supplier.strip(), font=font_main, fill=COLOR_BLACK, anchor="lm")
     draw.text((430, 1138), bill_info.strip(), font=font_main, fill=COLOR_BLACK, anchor="lm")
 
-    # 3. Таблица товаров (координаты строк строго по центру)
+    # 3. Таблица товаров (строки 1, 2, 3, 4)
     row_centers_y = [1416, 1444, 1472, 1500]
 
     COL_NAME_X = 225     # Отступ в графе наименования
@@ -150,3 +143,141 @@ def generate_doverennost(
     pdf_buf.seek(0)
 
     return jpg_buf, pdf_buf
+
+
+# ==============================================================================
+# 3. ДИЛЕРСКИЙ ДОГОВОР ПК МИШКА (11 СТРАНИЦ)
+# ==============================================================================
+DILER_DOC_PATH = "Дилерский договор ПК МИШКА .pdf"
+
+def generate_diler_contract(
+    contract_num: str,
+    contract_date: str,
+    dealer_name: str,
+    dealer_preamble: str,
+    dealer_fio_short: str,
+    dealer_address: str,
+    dealer_inn_kpp: str,
+    dealer_rs: str,
+    dealer_ks: str,
+    dealer_bank: str,
+    dealer_bik: str,
+    dealer_phone: str
+) -> io.BytesIO:
+    """Генерация 11-страничного Дилерского договора с заполнением всех 3 мест реквизитов дилера"""
+    orig_reader = pypdf.PdfReader(DILER_DOC_PATH)
+    output = pypdf.PdfWriter()
+
+    # Формируем строки реквизитов (по образцу ООО "ПК Мишка")
+    req_lines = [
+        dealer_name.strip(),
+        dealer_address.strip(),
+        f"ИНН/КПП: {dealer_inn_kpp.strip()}",
+        f"Р/с: {dealer_rs.strip()}",
+        f"к/с: {dealer_ks.strip()}",
+        f"Банк: {dealer_bank.strip()}",
+        f"БИК: {dealer_bik.strip()}",
+        f"Тел.: {dealer_phone.strip()}"
+    ]
+
+    for page_idx in range(len(orig_reader.pages)):
+        orig_page = orig_reader.pages[page_idx]
+
+        # Создаем накладку для текущей страницы
+        packet = io.BytesIO()
+        c = canvas.Canvas(packet, pagesize=A4)
+
+        if page_idx == 0:
+            # --- СТР. 1: Номер, Дата и Преамбула ---
+            # Белые плашки поверх желтых меток
+            c.setFillColorRGB(1, 1, 1)
+            c.rect(320, 770, 80, 20, fill=1, stroke=0)
+            c.rect(430, 747, 130, 20, fill=1, stroke=0)
+            c.rect(50, 665, 200, 20, fill=1, stroke=0)
+
+            c.setFillColorRGB(0, 0, 0)
+            c.setFont("Arial-Bold", 11)
+            c.drawString(322, 775, f"№{contract_num.strip()}")
+            c.setFont("Arial", 10)
+            c.drawString(435, 752, contract_date.strip())
+            c.setFont("Arial", 9.5)
+            c.drawString(55, 670, f"{dealer_name.strip()}, {dealer_preamble.strip()}")
+
+        elif page_idx == 5:
+            # --- СТР. 6: Раздел 10 (МЕСТО №1 РЕКВИЗИТОВ ДИЛЕРА) ---
+            # Белая плашка поверх большого желтого квадрата
+            c.setFillColorRGB(1, 1, 1)
+            c.rect(275, 595, 240, 160, fill=1, stroke=0)
+
+            c.setFillColorRGB(0, 0, 0)
+            c.setFont("Arial", 8.5)
+            y_text = 745
+            for line in req_lines:
+                c.drawString(280, y_text, line)
+                y_text -= 14
+
+            # Подпись дилера
+            c.drawString(390, 523, f"/ {dealer_fio_short.strip()} /")
+
+        elif page_idx == 6:
+            # --- СТР. 7: Приложение №1 (Шапка) ---
+            c.setFillColorRGB(0, 0, 0)
+            c.setFont("Arial", 9)
+            c.drawString(235, 769, f"№ {contract_num.strip()}")
+            c.drawString(295, 769, contract_date.strip())
+
+        elif page_idx == 7:
+            # --- СТР. 8: Приложение №1 (Подпись) ---
+            c.setFillColorRGB(0, 0, 0)
+            c.setFont("Arial", 9)
+            c.drawString(390, 523, f"/ {dealer_fio_short.strip()} /")
+
+        elif page_idx == 8:
+            # --- СТР. 9: Приложение №2 (МЕСТО №2 РЕКВИЗИТОВ ДИЛЕРА) ---
+            c.setFillColorRGB(0, 0, 0)
+            c.setFont("Arial", 9)
+            c.drawString(235, 769, f"№ {contract_num.strip()}")
+            c.drawString(295, 769, contract_date.strip())
+
+            # Вставляем реквизиты дилера справа
+            c.setFont("Arial", 8.5)
+            y_text = 540
+            for line in req_lines:
+                c.drawString(280, y_text, line)
+                y_text -= 14
+
+            c.drawString(390, 317, f"/ {dealer_fio_short.strip()} /")
+
+        elif page_idx == 9:
+            # --- СТР. 10: Приложение №3 (Шапка) ---
+            # Белая плашка поверх желтой полосы
+            c.setFillColorRGB(1, 1, 1)
+            c.rect(70, 735, 450, 22, fill=1, stroke=0)
+
+            c.setFillColorRGB(0, 0, 0)
+            c.setFont("Arial", 9)
+            c.drawString(75, 742, f"к Дилерскому договору № {contract_num.strip()}   от  {contract_date.strip()}")
+
+        elif page_idx == 10:
+            # --- СТР. 11: Приложение №3 (МЕСТО №3 РЕКВИЗИТОВ ДИЛЕРА) ---
+            c.setFillColorRGB(0, 0, 0)
+            c.setFont("Arial", 8.5)
+            y_text = 680
+            for line in req_lines:
+                c.drawString(280, y_text, line)
+                y_text -= 14
+
+            c.drawString(390, 482, f"/ {dealer_fio_short.strip()} /")
+
+        c.showPage()
+        c.save()
+        packet.seek(0)
+
+        overlay_pdf = pypdf.PdfReader(packet)
+        orig_page.merge_page(overlay_pdf.pages[0])
+        output.add_page(orig_page)
+
+    final_buffer = io.BytesIO()
+    output.write(final_buffer)
+    final_buffer.seek(0)
+    return final_buffer
