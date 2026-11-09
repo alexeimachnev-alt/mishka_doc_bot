@@ -1,6 +1,6 @@
 import os
 import asyncio
-from aiohttp import web
+from aiohttp import web, ClientSession
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart
@@ -13,6 +13,7 @@ from generator import generate_certificate
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.getenv("PORT", 8080))
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
 
 if not BOT_TOKEN:
     print("ВНИМАНИЕ: BOT_TOKEN не задан! Добавьте его в .env или в Environment Variables на Render.")
@@ -68,17 +69,45 @@ async def process_date(message: Message, state: FSMContext):
         valid_until=valid_until
     )
 
+    # 1. Отправка фото для быстрого просмотра
     photo_file = BufferedInputFile(img_buf.getvalue(), filename="certificate.jpg")
     await message.answer_photo(photo_file, caption=f"✅ Сертификат {data['number']} готов!\nНовый — /start")
 
+    # 2. Отправка PDF высокого качества для печати
     pdf_name = f"Сертификат_{data['number'].replace('/', '_')}.pdf"
     pdf_file = BufferedInputFile(pdf_buf.getvalue(), filename=pdf_name)
     await message.answer_document(pdf_file)
 
 async def healthcheck(request):
-    return web.Response(text="Certificate Bot is running 24/7!")
+    """Эндпоинт для проверки активности Render"""
+    return web.Response(text="Certificate Bot is alive and kicking 24/7!")
+
+# Встроенный авто-пингатор (держит Render активным без сторонних сервисов)
+async def self_ping():
+    await asyncio.sleep(30)  # Даем серверу запуститься перед первым пингом
+    
+    url = RENDER_EXTERNAL_URL
+    if not url:
+        url = f"http://localhost:{PORT}"
+        print(f"[Пингатор] RENDER_EXTERNAL_URL не задана. Пингуем локально: {url}")
+    else:
+        if not url.startswith("http"):
+            url = f"https://{url}"
+
+    print(f"[Пингатор] Автопинг запущен на адрес: {url}")
+    
+    while True:
+        try:
+            async with ClientSession() as session:
+                async with session.get(url, timeout=15) as resp:
+                    print(f"[Пингатор] Успешный пинг на {url} | Код: {resp.status}")
+        except Exception as e:
+            print(f"[Пингатор] Ошибка запроса: {e}")
+            
+        await asyncio.sleep(600)  # Пинг раз в 10 минут (Render засыпает через 15)
 
 async def main():
+    # 1. Запуск мини-сервера
     app = web.Application()
     app.router.add_get("/", healthcheck)
     runner = web.AppRunner(app)
@@ -87,6 +116,10 @@ async def main():
     await site.start()
     print(f"Веб-сервер слушает порт {PORT}")
 
+    # 2. Фоновый самопинг
+    asyncio.create_task(self_ping())
+
+    # 3. Telegram-бот
     print("Бот готов к работе!")
     await dp.start_polling(bot)
 
