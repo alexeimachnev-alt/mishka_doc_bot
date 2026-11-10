@@ -69,7 +69,7 @@ async def cmd_start(message: Message, state: FSMContext):
 async def start_contract_step(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
-        "📑 **Оформление Дилерского договора (новая редакция)**\n\n"
+        "📑 **Оформление Дилерского договора (формат DOCX)**\n\n"
         "Выберите тип Дилера кнопкой внизу:",
         reply_markup=dealer_type_keyboard
     )

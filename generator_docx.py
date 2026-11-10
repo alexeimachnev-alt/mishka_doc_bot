@@ -12,57 +12,57 @@ def generate_diler_contract_docx(
     dealer_fio_short: str,
     custom_req_lines: list[str]
 ) -> io.BytesIO:
-    source_path = "Dilerskiy_Dogovor_PK_Mishka_redaktirovanny.docx"
+    source_path = "Дилерский_договор_111000_ООО_МАЧНЕВ_И_КО.docx"
     doc = docx.Document(source_path)
 
-    # 1. Update Paragraphs
+    # 1. Замена текста в абзацах
     for p in doc.paragraphs:
-        # Preamble replacement
-        if "с одной стороны, и Индивидуальный предприниматель" in p.text:
+        # Преамбула
+        if "с одной стороны, и ООО МАЧНЕВ И КО, в лице" in p.text:
             if dealer_preamble:
                 new_dealer_str = f"{dealer_name}, {dealer_preamble}, именуемый в дальнейшем «Дилер»"
             else:
                 new_dealer_str = f"{dealer_name}, именуемый в дальнейшем «Дилер»"
-
-            target_str = "Индивидуальный предприниматель / Гражданка РФ Болталина Карина Николаевна, именуемая в дальнейшем «Дилер»"
+            
+            target_str = "ООО МАЧНЕВ И КО, в лице Генерального директора Мачнева А.И., действующего на основании Устава, именуемый в дальнейшем «Дилер»"
             p.text = p.text.replace(target_str, new_dealer_str)
 
-        # Contract number and signatures
+        # Поиск и замена по отдельным run-ам для сохранения жирности
         for run in p.runs:
-            if "23940" in run.text:
-                run.text = run.text.replace("23940", contract_num)
-            if "«___» ____________ 202_ г." in run.text:
-                run.text = run.text.replace("«___» ____________ 202_ г.", contract_date)
-            if "Болталина К. Н." in run.text:
+            if "111000" in run.text:
+                run.text = run.text.replace("111000", contract_num)
+            if "«11» ноября 2026г." in run.text:
+                run.text = run.text.replace("«11» ноября 2026г.", contract_date)
+            if "Мачнев А.И." in run.text:
                 clean_fio = dealer_fio_short.strip().strip("/").strip()
-                run.text = run.text.replace("Болталина К. Н.", clean_fio)
+                run.text = run.text.replace("Мачнев А.И.", clean_fio)
 
-    # 2. Update Tables
+    # 2. Замена текста в таблицах
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
-                # Date in the top table
-                if "«___» ____________ 202_ г." in cell.text:
+                # Замена даты в верхней таблице
+                if "«11» ноября 2026г." in cell.text:
                     for p in cell.paragraphs:
                         for run in p.runs:
-                            if "«___» ____________ 202_ г." in run.text:
-                                run.text = run.text.replace("«___» ____________ 202_ г.", contract_date)
+                            if "«11» ноября 2026г." in run.text:
+                                run.text = run.text.replace("«11» ноября 2026г.", contract_date)
 
-                # Requisites in the bottom table
-                if "Болталина Карина Николаевна" in cell.text and "Паспорт" in cell.text:
-                    # Clear cell
+                # Замена реквизитов Дилера в нижней таблице (ищем старое название "ООО МАЧНЕВ И КО")
+                if "ООО МАЧНЕВ И КО" in cell.text:
+                    # Очищаем ячейку
                     cell.text = ""
-                    # Rebuild cell paragraphs
+                    # Воссоздаем абзацы реквизитов
                     for i, line in enumerate(custom_req_lines):
                         p = cell.add_paragraph()
-                        # Apply Calibri 10.5 matching original layout
+                        # Применяем оригинальный стиль Calibri 10.5
                         p.style = doc.styles['Normal']
                         if i == 0 or line == "Дилер":
                             p.add_run(line).bold = True
                         else:
                             p.add_run(line)
 
-                    # Add signature
+                    # Добавляем строку с подписью
                     p = cell.add_paragraph("\nДилер\n\n")
                     p.runs[0].bold = True
                     clean_fio = dealer_fio_short.strip().strip("/").strip()
