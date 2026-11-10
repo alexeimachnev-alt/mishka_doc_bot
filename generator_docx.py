@@ -18,21 +18,38 @@ def generate_diler_contract_docx(
     # 1. Замена текста в абзацах
     for p in doc.paragraphs:
         # Преамбула
-        if "с одной стороны, и ООО МАЧНЕВ И КО, в лице" in p.text:
-            if dealer_preamble:
-                new_dealer_str = f"{dealer_name}, {dealer_preamble}, именуемый в дальнейшем «Дилер»"
-            else:
-                new_dealer_str = f"{dealer_name}, именуемый в дальнейшем «Дилер»"
-            
-            target_str = "ООО МАЧНЕВ И КО, в лице Генерального директора Мачнева А.И., действующего на основании Устава, именуемый в дальнейшем «Дилер»"
-            p.text = p.text.replace(target_str, new_dealer_str)
+        if "с одной стороны, и" in p.text and ("Дилер" in p.text or "именуемый" in p.text or "именуемая" in p.text):
+            if "ООО МАЧНЕВ И КО" in p.text or "Индивидуальный предприниматель" in p.text or "Гражданка" in p.text:
+                parts = p.text.split("с одной стороны, и")
+                if len(parts) == 2:
+                    prefix = parts[0] + "с одной стороны, и "
+                    if dealer_preamble:
+                        new_dealer_str = f"{dealer_name}, {dealer_preamble}, именуемый в дальнейшем «Дилер»"
+                    else:
+                        new_dealer_str = f"{dealer_name}, именуемый в дальнейшем «Дилер»"
+                    
+                    # Ищем где заканчивается блок дилера
+                    for keyword in ["именуемый в дальнейшем «Дилер»", "именуемая в дальнейшем «Дилер»"]:
+                        if keyword in parts[1]:
+                            suffix_parts = parts[1].split(keyword)
+                            if len(suffix_parts) >= 2:
+                                suffix = keyword + suffix_parts[1]
+                                p.text = prefix + new_dealer_str + suffix
+                                break
 
         # Поиск и замена по отдельным run-ам для сохранения жирности
         for run in p.runs:
             if "111000" in run.text:
                 run.text = run.text.replace("111000", contract_num)
-            if "«11» ноября 2026г." in run.text:
-                run.text = run.text.replace("«11» ноября 2026г.", contract_date)
+            if "Мачнев А.И." in run.text:
+                clean_fio = dealer_fio_short.strip().strip("/").strip()
+                run.text = run.text.replace("Мачнев А.И.", clean_fio)
+
+    # Общий проход для гарантии замены номера договора
+    for p in doc.paragraphs:
+        for run in p.runs:
+            if "111000" in run.text:
+                run.text = run.text.replace("111000", contract_num)
             if "Мачнев А.И." in run.text:
                 clean_fio = dealer_fio_short.strip().strip("/").strip()
                 run.text = run.text.replace("Мачнев А.И.", clean_fio)
@@ -41,21 +58,27 @@ def generate_diler_contract_docx(
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
-                # Замена даты в верхней таблице
-                if "«11» ноября 2026г." in cell.text:
+                # Замена даты в верхней таблице или шапках
+                if "ноября" in cell.text or "202_" in cell.text or "2026" in cell.text:
                     for p in cell.paragraphs:
                         for run in p.runs:
-                            if "«11» ноября 2026г." in run.text:
-                                run.text = run.text.replace("«11» ноября 2026г.", contract_date)
+                            if any(d in run.text for d in ["2026", "202_", "ноября", "от"]):
+                                run.text = contract_date
 
-                # Замена реквизитов Дилера в нижней таблице (ищем старое название "ООО МАЧНЕВ И КО")
-                if "ООО МАЧНЕВ И КО" in cell.text:
+                # Замена номера договора в приложениях
+                if "№" in cell.text and ("от" in cell.text or "Договору" in cell.text):
+                    for p in cell.paragraphs:
+                        for run in p.runs:
+                            if "111000" in run.text:
+                                run.text = run.text.replace("111000", contract_num)
+
+                # Замена реквизитов Дилера в нижней таблице
+                if "МАЧНЕВ" in cell.text or "Паспорт" in cell.text or "ИНН/КПП" in cell.text or "Р/с" in cell.text or "Юр. адрес" in cell.text:
                     # Очищаем ячейку
                     cell.text = ""
                     # Воссоздаем абзацы реквизитов
                     for i, line in enumerate(custom_req_lines):
                         p = cell.add_paragraph()
-                        # Применяем оригинальный стиль Calibri 10.5
                         p.style = doc.styles['Normal']
                         if i == 0 or line == "Дилер":
                             p.add_run(line).bold = True
@@ -67,6 +90,13 @@ def generate_diler_contract_docx(
                     p.runs[0].bold = True
                     clean_fio = dealer_fio_short.strip().strip("/").strip()
                     p.add_run(f"___________ / {clean_fio} /")
+
+    # Проверка шапок приложений на наличие номера договора
+    for p in doc.paragraphs:
+        if "к Дилерскому договору №" in p.text:
+            for run in p.runs:
+                if "111000" in run.text:
+                    run.text = run.text.replace("111000", contract_num)
 
     buf = io.BytesIO()
     doc.save(buf)

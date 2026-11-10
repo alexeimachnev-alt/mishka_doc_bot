@@ -16,9 +16,8 @@ from aiogram.types import (
     ReplyKeyboardRemove
 )
 
-from generator import generate_certificate
+from generator import generate_certificate, generate_doverennost
 from generator_docx import generate_diler_contract_docx, convert_docx_to_pdf
-from generator_excel import generate_doverennost_xlsx, convert_xlsx_to_pdf
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -55,14 +54,6 @@ class ContractForm(StatesGroup):
     bank_details = State()
     fiz_passport = State()
 
-class DoverennostForm(StatesGroup):
-    number = State()
-    dates = State()
-    fio_job = State()
-    passport = State()
-    supplier = State()
-    item = State()
-
 @dp.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
@@ -72,96 +63,7 @@ async def cmd_start(message: Message, state: FSMContext):
         reply_markup=main_keyboard
     )
 
-# ==============================================================================
-# 1. ДОВЕРЕННОСТЬ М-2 (EXCEL -> PDF)
-# ==============================================================================
-@dp.message(F.text == "📝 Создать Доверенность М-2")
-@dp.message(Command("dov"))
-async def start_dov_step(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer(
-        "📝 **Оформление Доверенности М-2 (по ГОСТу с печатью)**\n\n"
-        "Шаг 1: Введите **номер доверенности**:",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    await state.set_state(DoverennostForm.number)
-
-@dp.message(DoverennostForm.number)
-async def dov_step_num(message: Message, state: FSMContext):
-    await state.update_data(number=message.text.strip())
-    await message.answer("Шаг 2: Введите **дату выдачи** и **срок действия** (каждую с новой строки).\n*Пример:*\n2023-11-01\n2023-11-15")
-    await state.set_state(DoverennostForm.dates)
-
-@dp.message(DoverennostForm.dates)
-async def dov_step_dates(message: Message, state: FSMContext):
-    lines = message.text.strip().split('\n')
-    await state.update_data(
-        date_issue=lines[0] if len(lines) > 0 else "",
-        date_valid=lines[1] if len(lines) > 1 else ""
-    )
-    await message.answer("Шаг 3: Введите **должность** и **ФИО** доверенного лица (с новой строки).\n*Пример:*\nменеджер\nПетров Петр Петрович")
-    await state.set_state(DoverennostForm.fio_job)
-
-@dp.message(DoverennostForm.fio_job)
-async def dov_step_fio(message: Message, state: FSMContext):
-    lines = message.text.strip().split('\n')
-    await state.update_data(
-        fio_job=lines[0] if len(lines) > 0 else "",
-        fio=lines[1] if len(lines) > 1 else ""
-    )
-    await message.answer("Шаг 4: Введите **паспортные данные** (Серия, Номер, Кем выдан, Дата выдачи — всё с новой строки).\n*Пример:*\n1234\n567890\nОВД Тверского района г. Москвы\n12.12.2020")
-    await state.set_state(DoverennostForm.passport)
-
-@dp.message(DoverennostForm.passport)
-async def dov_step_passport(message: Message, state: FSMContext):
-    lines = message.text.strip().split('\n')
-    await state.update_data(
-        passport_series=lines[0] if len(lines) > 0 else "",
-        passport_number=lines[1] if len(lines) > 1 else "",
-        passport_issued_by=lines[2] if len(lines) > 2 else "",
-        passport_date=lines[3] if len(lines) > 3 else ""
-    )
-    await message.answer("Шаг 5: Введите наименование **поставщика**:\n*Пример:* ООО «Ромашка»")
-    await state.set_state(DoverennostForm.supplier)
-
-@dp.message(DoverennostForm.supplier)
-async def dov_step_supplier(message: Message, state: FSMContext):
-    await state.update_data(supplier=message.text.strip())
-    await message.answer("Шаг 6: Укажите **ТМЦ к получению** (Наименование, ед.изм., кол-во — через перенос строки).\n*Пример:*\nКабель силовой\nм\n150")
-    await state.set_state(DoverennostForm.item)
-
-@dp.message(DoverennostForm.item)
-async def dov_step_finish(message: Message, state: FSMContext):
-    lines = message.text.strip().split('\n')
-    await state.update_data(
-        item_name=lines[0] if len(lines) > 0 else "",
-        item_unit=lines[1] if len(lines) > 1 else "",
-        item_qty=lines[2] if len(lines) > 2 else ""
-    )
-    
-    data = await state.get_data()
-    await state.clear()
-    
-    await message.answer("⏳ Генерирую доверенность М-2 (XLSX и PDF)...", reply_markup=main_keyboard)
-    try:
-        # Генерируем Excel
-        xlsx_buf = generate_doverennost_xlsx(data)
-        xlsx_file = BufferedInputFile(xlsx_buf.getvalue(), filename=f"Доверенность_М2_№{data['number']}.xlsx")
-        await message.answer_document(xlsx_file, caption=f"✅ Доверенность №{data['number']} (Excel)")
-
-        # Конвертируем в PDF через LibreOffice
-        pdf_buf = convert_xlsx_to_pdf(xlsx_buf)
-        if pdf_buf:
-            pdf_file = BufferedInputFile(pdf_buf.getvalue(), filename=f"Доверенность_М2_№{data['number']}.pdf")
-            await message.answer_document(pdf_file, caption=f"✅ Доверенность №{data['number']} (PDF)")
-        else:
-            await message.answer("⚠️ Сервер не смог сгенерировать PDF, но Excel-документ готов!")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка генерации: {e}")
-
-# ==============================================================================
-# 2. ДИЛЕРСКИЙ ДОГОВОР
-# ==============================================================================
+# --- ДИЛЕРСКИЙ ДОГОВОР ---
 @dp.message(F.text == "📑 Оформить Дилерский договор")
 @dp.message(Command("dogovor"))
 async def start_contract_step(message: Message, state: FSMContext):
