@@ -1,30 +1,47 @@
 import io
+import os
 from PIL import Image, ImageDraw, ImageFont
 import pypdf
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.utils import simpleSplit
 
-pdfmetrics.registerFont(TTFont("Arial", "arial.ttf"))
-pdfmetrics.registerFont(TTFont("Arial-Bold", "arialbd.ttf"))
+# ==============================================================================
+# НАСТРОЙКА И РЕГИСТРАЦИЯ ШРИФТОВ (TIMES NEW ROMAN & ARIAL)
+# ==============================================================================
+FONT_FILE_SERIF = "times.ttf" if os.path.exists("times.ttf") else "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf"
+FONT_FILE_SERIF_BOLD = "timesbd.ttf" if os.path.exists("timesbd.ttf") else "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf"
+FONT_FILE_SANS = "arial.ttf" if os.path.exists("arial.ttf") else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+FONT_FILE_BOLD = "arialbd.ttf" if os.path.exists("arialbd.ttf") else "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
+
+pdfmetrics.registerFont(TTFont("Times-Roman-Custom", FONT_FILE_SERIF))
+pdfmetrics.registerFont(TTFont("Times-Bold-Custom", FONT_FILE_SERIF_BOLD))
+pdfmetrics.registerFont(TTFont("Arial", FONT_FILE_SANS))
+pdfmetrics.registerFont(TTFont("Arial-Bold", FONT_FILE_BOLD))
+
+
+def _resolve_template_path(base_name: str) -> str:
+    """Автоматический поиск шаблона (.png или .jpg)."""
+    for ext in [".png", ".jpg", ".jpeg"]:
+        candidate = f"{base_name}{ext}"
+        if os.path.exists(candidate):
+            return candidate
+    return f"{base_name}.png"
+
 
 # ==============================================================================
 # 1. СЕРТИФИКАТ ДИЛЕРА
 # ==============================================================================
-CERT_TEMPLATE_PATH = "cert_template.png"
-
-FONT_FILE_SERIF = "times.ttf"
-FONT_FILE_SANS = "arial.ttf"
-FONT_FILE_BOLD = "arialbd.ttf"
-
 def generate_certificate(
     cert_num: str,
     company_name: str,
     inn: str,
     valid_until: str
 ) -> tuple[io.BytesIO, io.BytesIO]:
-    image = Image.open(CERT_TEMPLATE_PATH).convert("RGB")
+    cert_path = _resolve_template_path("cert_template")
+    image = Image.open(cert_path).convert("RGB")
     draw = ImageDraw.Draw(image)
     width, _ = image.size
 
@@ -59,8 +76,6 @@ def generate_certificate(
 # ==============================================================================
 # 2. ДОВЕРЕННОСТЬ М-2
 # ==============================================================================
-DOV_TEMPLATE_PATH = "doverennost_template.png"
-
 def generate_doverennost(
     number: str,
     date_issue: str,
@@ -74,7 +89,8 @@ def generate_doverennost(
     bill_info: str,
     items: list[tuple[str, str, str]]
 ) -> tuple[io.BytesIO, io.BytesIO]:
-    image = Image.open(DOV_TEMPLATE_PATH).convert("RGB")
+    dov_path = _resolve_template_path("doverennost_template")
+    image = Image.open(dov_path).convert("RGB")
     draw = ImageDraw.Draw(image)
 
     font_main = ImageFont.truetype(FONT_FILE_SANS, size=24)
@@ -142,9 +158,76 @@ def generate_doverennost(
 
 
 # ==============================================================================
-# 3. ДИЛЕРСКИЙ ДОГОВОР ПК МИШКА (11 СТРАНИЦ)
+# 3. ДИЛЕРСКИЙ ДОГОВОР ПК МИШКА (10 СТРАНИЦ, НОВЫЙ ШАБЛОН)
 # ==============================================================================
 DILER_DOC_PATH = "diler_dogovor_source.pdf"
+
+def _draw_dealer_block(
+    c: canvas.Canvas,
+    x_col: float,
+    y_header_base: float,
+    y_first_line_base: float,
+    y_rect_bottom: float,
+    y_rect_top: float,
+    x_sig_line: float,
+    y_sig_base: float,
+    req_lines: list[str],
+    dealer_fio_short: str
+):
+    """
+    Полностью перекрывает желтые выделения в колонке Дилера и блоке подписи,
+    затем выводит заголовок «Дилер», реквизиты (с автопереносом строк) и подпись
+    оригинальным шрифтом Times New Roman (10.08 pt).
+    """
+    # 1. Закрашиваем всю желтую зону реквизитов и заголовка «Дилер»
+    c.setFillColorRGB(1, 1, 1)
+    c.rect(x_col - 1.5, y_rect_bottom - 2.0, 266.0, (y_rect_top - y_rect_bottom) + 4.0, fill=1, stroke=0)
+
+    # 2. Заголовок «Дилер» (Times-Bold, 10.08 pt)
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Times-Bold-Custom", 10.08)
+    c.drawString(x_col, y_header_base, "Дилер")
+
+    # 3. Разбиваем строки реквизитов с учетом ширины колонки (252 pt)
+    wrapped_lines = []
+    max_width = 252.0
+    for idx, raw_line in enumerate(req_lines):
+        text_line = raw_line.strip()
+        if not text_line:
+            continue
+        parts = simpleSplit(text_line, "Times-Roman-Custom", 10.08, max_width)
+        wrapped_lines.extend(parts)
+        # После первой строки (наименования/ФИО дилера) делаем небольшой отступ, как в оригинале
+        if idx == 0 and len(req_lines) <= 9:
+            wrapped_lines.append("")
+
+    # Если строк много (например, паспортные данные + адрес), убираем пустую строку-разделитель
+    non_empty_count = len([x for x in wrapped_lines if x])
+    if len(wrapped_lines) > 11 and "" in wrapped_lines:
+        wrapped_lines.remove("")
+
+    # Подбираем межстрочный интервал, чтобы все строки идеально поместились в блок
+    font_size = 10.08
+    step_y = 11.52
+    if len(wrapped_lines) > 11:
+        font_size = 9.5
+        step_y = 10.4
+
+    c.setFont("Times-Roman-Custom", font_size)
+    curr_y = y_first_line_base
+    for w_line in wrapped_lines[:13]:
+        if w_line:
+            c.drawString(x_col, curr_y, w_line)
+        curr_y -= step_y
+
+    # 4. Закрашиваем и вписываем строку подписи Дилера
+    c.setFillColorRGB(1, 1, 1)
+    c.rect(x_sig_line - 2.0, y_sig_base - 3.5, 140.0, 15.0, fill=1, stroke=0)
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Times-Roman-Custom", 10.08)
+    clean_fio = dealer_fio_short.strip().strip("/").strip()
+    c.drawString(x_sig_line, y_sig_base, f"___________/ {clean_fio} /")
+
 
 def generate_diler_contract(
     contract_num: str,
@@ -152,29 +235,37 @@ def generate_diler_contract(
     dealer_name: str,
     dealer_preamble: str,
     dealer_fio_short: str,
-    dealer_address: str,
-    dealer_inn_kpp: str,
-    dealer_rs: str,
-    dealer_ks: str,
-    dealer_bank: str,
-    dealer_bik: str,
-    dealer_phone: str
+    dealer_address: str = "",
+    dealer_inn_kpp: str = "",
+    dealer_rs: str = "",
+    dealer_ks: str = "",
+    dealer_bank: str = "",
+    dealer_bik: str = "",
+    dealer_phone: str = "",
+    custom_req_lines: list[str] | None = None
 ) -> io.BytesIO:
-    # Инициализация клонированием для совместимости с pypdf 7.0+
-    writer = pypdf.PdfWriter(clone_from=DILER_DOC_PATH)
+    source_path = DILER_DOC_PATH
+    if not os.path.exists(source_path) and os.path.exists("Дилерский договор ПК МИШКА .pdf"):
+        source_path = "Дилерский договор ПК МИШКА .pdf"
+
+    writer = pypdf.PdfWriter(clone_from=source_path)
 
     clean_num = contract_num.strip().lstrip("№").strip()
+    clean_date = contract_date.strip()
 
-    req_lines = [
-        dealer_name.strip(),
-        dealer_address.strip(),
-        f"ИНН/КПП: {dealer_inn_kpp.strip()}",
-        f"Р/с: {dealer_rs.strip()}",
-        f"к/с: {dealer_ks.strip()}",
-        f"Банк: {dealer_bank.strip()}",
-        f"БИК: {dealer_bik.strip()}",
-        f"Тел.: {dealer_phone.strip()}"
-    ]
+    if custom_req_lines is not None:
+        req_lines = custom_req_lines
+    else:
+        req_lines = [
+            dealer_name.strip(),
+            f"Адрес: {dealer_address.strip()}" if not dealer_address.strip().lower().startswith("адрес") else dealer_address.strip(),
+            f"ИНН/КПП: {dealer_inn_kpp.strip()}",
+            f"Расчетный счет: {dealer_rs.strip()}",
+            f"Кор. счет: {dealer_ks.strip()}",
+            f"Банк: {dealer_bank.strip()}",
+            f"БИК: {dealer_bik.strip()}",
+            f"Тел.: {dealer_phone.strip()}"
+        ]
 
     for page_idx in range(len(writer.pages)):
         page = writer.pages[page_idx]
@@ -182,110 +273,107 @@ def generate_diler_contract(
         c = canvas.Canvas(packet, pagesize=A4)
 
         if page_idx == 0:
-            # 1. Номер договора
+            # 1. Номер договора (желтый блок [310.32, 775.2, 349.44, 789.12])
             c.setFillColorRGB(1, 1, 1)
-            c.rect(300, 770, 70, 20, fill=1, stroke=0)
+            c.rect(309.0, 773.5, 90.0, 17.5, fill=1, stroke=0)
             c.setFillColorRGB(0, 0, 0)
-            c.setFont("Arial-Bold", 11)
-            c.drawString(305, 776, clean_num)
+            c.setFont("Times-Bold-Custom", 12.0)
+            c.drawString(310.37, 777.84, f"№{clean_num}")
 
-            # 2. Дата договора
+            # 2. Дата договора (желтый блок [398.88, 761.04, 510.72, 773.04])
             c.setFillColorRGB(1, 1, 1)
-            c.rect(420, 755, 120, 20, fill=1, stroke=0)
+            c.rect(396.0, 759.0, 150.0, 16.0, fill=1, stroke=0)
             c.setFillColorRGB(0, 0, 0)
-            c.setFont("Arial", 9.5)
-            c.drawString(425, 762, contract_date.strip())
+            c.setFont("Times-Roman-Custom", 10.56)
+            c.drawString(398.88, 763.20, clean_date)
 
-            # 3. Преамбула (перекрываем строку целиком)
+            # 3. Преамбула (желтый блок [64.32, 672.72, 234.72, 685.68] + черная линия подчеркивания)
             c.setFillColorRGB(1, 1, 1)
-            c.rect(60, 668, 475, 20, fill=1, stroke=0)
+            c.rect(62.0, 670.5, 485.0, 17.5, fill=1, stroke=0)
             c.setFillColorRGB(0, 0, 0)
-            c.setFont("Arial", 9)
-            preamble_full = f"{dealer_name.strip()}, {dealer_preamble.strip()},"
-            c.drawString(64, 674, preamble_full)
-            c.drawString(64 + c.stringWidth(preamble_full, "Arial", 9) + 4, 674, 'именуемая в дальнейшем "Дилер", с другой стороны,')
+
+            preamble_part = dealer_preamble.strip().strip(",")
+            if preamble_part:
+                full_preamble_line = f'{dealer_name.strip()}, {preamble_part}, именуемый в дальнейшем "Дилер", с другой стороны,'
+            else:
+                full_preamble_line = f'{dealer_name.strip()}, именуемый в дальнейшем "Дилер", с другой стороны,'
+
+            # Автоматический подбор размера шрифта (от 11.04 до 8.5 pt), чтобы строка легла ровно в одну линию
+            p_size = 11.04
+            while p_size > 8.0 and pdfmetrics.stringWidth(full_preamble_line, "Times-Roman-Custom", p_size) > 472.0:
+                p_size -= 0.2
+
+            c.setFont("Times-Roman-Custom", p_size)
+            c.drawString(63.77, 675.36, full_preamble_line)
 
         elif page_idx == 5:
-            # Стр. 6: Место 1 реквизитов дилера
+            # Стр. 6: Приложение №1 (желтые блоки [73.44, 729.84, 553.92, 754.80])
             c.setFillColorRGB(1, 1, 1)
-            c.rect(275, 540, 275, 185, fill=1, stroke=0)
-            c.rect(290, 425, 250, 35, fill=1, stroke=0)
-
+            c.rect(72.0, 728.0, 485.0, 28.5, fill=1, stroke=0)
             c.setFillColorRGB(0, 0, 0)
-            c.setFont("Arial", 8.5)
-            y_text = 707
-            for line in req_lines:
-                c.drawString(280, y_text, line)
-                y_text -= 14
-
-            c.setFont("Arial", 9.5)
-            c.drawString(292, 440, f"директор _______________ / {dealer_fio_short.strip()} /")
+            c.setFont("Times-Roman-Custom", 11.04)
+            c.drawString(74.87, 744.72, f"к дилерскому договору № {clean_num} от {clean_date}")
 
         elif page_idx == 6:
-            # Стр. 7: Приложение №1 (Шапка)
-            c.setFillColorRGB(1, 1, 1)
-            c.rect(70, 755, 300, 16, fill=1, stroke=0)
-            c.setFillColorRGB(0, 0, 0)
-            c.setFont("Arial", 9.5)
-            c.drawString(75, 760, f"к дилерскому договору № {clean_num} от {contract_date.strip()}")
+            # Стр. 7: Реквизиты и подпись к Приложению №1
+            _draw_dealer_block(
+                c=c,
+                x_col=294.0,
+                y_header_base=782.64,
+                y_first_line_base=769.68,
+                y_rect_bottom=653.5,
+                y_rect_top=792.5,
+                x_sig_line=416.78,
+                y_sig_base=573.12,
+                req_lines=req_lines,
+                dealer_fio_short=dealer_fio_short
+            )
 
         elif page_idx == 7:
-            # Стр. 8: Приложение №1 (Подпись)
+            # Стр. 8: Приложение №2 (Шапка + Реквизиты + Подпись)
+            # 1. Шапка Приложения №2 (желтый блок [73.44, 714.48, 553.92, 726.48])
             c.setFillColorRGB(1, 1, 1)
-            c.rect(290, 510, 250, 30, fill=1, stroke=0)
+            c.rect(72.0, 713.0, 485.0, 15.0, fill=1, stroke=0)
             c.setFillColorRGB(0, 0, 0)
-            c.setFont("Arial", 9.5)
-            c.drawString(292, 526, f"Генеральный директор ____________ / {dealer_fio_short.strip()} /")
+            c.setFont("Times-Roman-Custom", 11.04)
+            c.drawString(74.87, 717.12, f"к Дилерскому договору № {clean_num} от {clean_date}")
+
+            # 2. Реквизиты и подпись Дилера на стр. 8
+            _draw_dealer_block(
+                c=c,
+                x_col=294.0,
+                y_header_base=468.72,
+                y_first_line_base=455.76,
+                y_rect_bottom=339.5,
+                y_rect_top=478.5,
+                x_sig_line=416.78,
+                y_sig_base=259.20,
+                req_lines=req_lines,
+                dealer_fio_short=dealer_fio_short
+            )
 
         elif page_idx == 8:
-            # Стр. 9: Приложение №2
+            # Стр. 9: Приложение №3 (желтые блоки [73.44, 764.88, 553.92, 787.20])
             c.setFillColorRGB(1, 1, 1)
-            c.rect(70, 725, 300, 18, fill=1, stroke=0)
+            c.rect(72.0, 763.5, 485.0, 25.0, fill=1, stroke=0)
             c.setFillColorRGB(0, 0, 0)
-            c.setFont("Arial", 9.5)
-            c.drawString(75, 731, f"к Дилерскому договору № {clean_num} от {contract_date.strip()}")
-
-            # Реквизиты дилера
-            c.setFillColorRGB(1, 1, 1)
-            c.rect(275, 315, 275, 165, fill=1, stroke=0)
-            c.setFillColorRGB(0, 0, 0)
-            c.setFont("Arial", 8.5)
-            y_text = 465
-            for line in req_lines:
-                c.drawString(280, y_text, line)
-                y_text -= 14
-
-            # Подпись дилера
-            c.setFillColorRGB(1, 1, 1)
-            c.rect(290, 235, 250, 30, fill=1, stroke=0)
-            c.setFillColorRGB(0, 0, 0)
-            c.setFont("Arial", 9.5)
-            c.drawString(292, 247, f"Генеральный директор ____________ / {dealer_fio_short.strip()} /")
+            c.setFont("Times-Roman-Custom", 11.04)
+            c.drawString(74.87, 778.32, f"к Дилерскому договору № {clean_num} от {clean_date}")
 
         elif page_idx == 9:
-            # Стр. 10: Приложение №3 (Шапка над таблицей)
-            c.setFillColorRGB(1, 1, 1)
-            c.rect(70, 700, 470, 20, fill=1, stroke=0)
-            c.setFillColorRGB(0, 0, 0)
-            c.setFont("Arial", 9.5)
-            c.drawString(75, 706, f"к Дилерскому договору № {clean_num} от {contract_date.strip()}")
-
-        elif page_idx == 10:
-            # Стр. 11: Приложение №3 (Конец)
-            c.setFillColorRGB(1, 1, 1)
-            c.rect(275, 545, 275, 165, fill=1, stroke=0)
-            c.setFillColorRGB(0, 0, 0)
-            c.setFont("Arial", 8.5)
-            y_text = 688
-            for line in req_lines:
-                c.drawString(280, y_text, line)
-                y_text -= 14
-
-            c.setFillColorRGB(1, 1, 1)
-            c.rect(250, 470, 290, 30, fill=1, stroke=0)
-            c.setFillColorRGB(0, 0, 0)
-            c.setFont("Arial", 9.5)
-            c.drawString(254, 483, f"Генеральный директор ____________ / {dealer_fio_short.strip()} /")
+            # Стр. 10: Реквизиты и подпись к Приложению №3
+            _draw_dealer_block(
+                c=c,
+                x_col=286.56,
+                y_header_base=753.36,
+                y_first_line_base=740.40,
+                y_rect_bottom=624.0,
+                y_rect_top=763.2,
+                x_sig_line=409.34,
+                y_sig_base=543.84,
+                req_lines=req_lines,
+                dealer_fio_short=dealer_fio_short
+            )
 
         c.showPage()
         c.save()

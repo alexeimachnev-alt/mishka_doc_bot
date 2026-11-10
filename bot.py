@@ -35,6 +35,15 @@ main_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# Клавиатура выбора типа Дилера
+dealer_type_keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="🏢 Юрлицо / ИП (реквизиты счета)"), KeyboardButton(text="👤 Физлицо (паспортные данные)")]
+    ],
+    resize_keyboard=True,
+    one_time_keyboard=True
+)
+
 # 1. Состояния для Сертификата
 class CertForm(StatesGroup):
     number = State()
@@ -54,15 +63,15 @@ class DovForm(StatesGroup):
 
 # 3. Состояния для Дилерского договора (поступательное заполнение)
 class ContractForm(StatesGroup):
+    dealer_type = State()
     number = State()
     date = State()
     dealer_name = State()
     preamble = State()
     fio_short = State()
     address = State()
-    inn_kpp = State()
     bank_details = State()
-    phone = State()
+    fiz_passport = State()
 
 
 # ==============================================================================
@@ -95,7 +104,7 @@ async def start_cert(message: Message, state: FSMContext):
 @dp.message(CertForm.number)
 async def cert_num(message: Message, state: FSMContext):
     await state.update_data(number=message.text.strip())
-    await message.answer("Шаг 2 из 4: Введите **название юрлица** (например: `ООО фирма \"Мосводопром\"`):")
+    await message.answer('Шаг 2 из 4: Введите **название юрлица** (например: `ООО фирма "Мосводопром"`):')
     await state.set_state(CertForm.company)
 
 @dp.message(CertForm.company)
@@ -285,15 +294,25 @@ async def dov_step_items(message: Message, state: FSMContext):
 
 
 # ==============================================================================
-# 3. ДИЛЕРСКИЙ ДОГОВОР (ПОСТУПАТЕЛЬНОЕ ЗАПОЛНЕНИЕ)
+# 3. ДИЛЕРСКИЙ ДОГОВОР (10 СТРАНИЦ, НОВЫЙ ШАБЛОН)
 # ==============================================================================
 @dp.message(F.text == "📑 Оформить Дилерский договор")
 @dp.message(Command("dogovor"))
 async def start_contract_step(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
-        "📑 **Оформление Дилерского договора (по шагам)**\n\n"
-        "Шаг 1 из 7: Введите **номер договора** (например: `23940`):",
+        "📑 **Оформление Дилерского договора (10 стр.)**\n\n"
+        "Выберите тип Дилера кнопкой внизу:",
+        reply_markup=dealer_type_keyboard
+    )
+    await state.set_state(ContractForm.dealer_type)
+
+@dp.message(ContractForm.dealer_type)
+async def contract_step_type(message: Message, state: FSMContext):
+    is_fiz = "физлицо" in message.text.lower()
+    await state.update_data(is_fiz=is_fiz)
+    await message.answer(
+        "Шаг 1: Введите **номер договора** (например: `23940`):",
         reply_markup=ReplyKeyboardRemove()
     )
     await state.set_state(ContractForm.number)
@@ -301,11 +320,10 @@ async def start_contract_step(message: Message, state: FSMContext):
 @dp.message(ContractForm.number)
 async def contract_step_num(message: Message, state: FSMContext):
     await state.update_data(number=message.text.strip())
-    # Предлагаем текущую дату или ручной ввод
     today_str = datetime.datetime.now().strftime("«%d» %m %Y г.")
     await message.answer(
-        f"Шаг 2 из 7: Введите **дату договора** (или отправьте `сегодня` для даты {today_str}):\n\n"
-        "*Пример:* `«10» ноября 2026 г.`"
+        f"Шаг 2: Введите **дату договора** (или отправьте `сегодня` для даты {today_str}):\n\n"
+        "*Пример:* `«11» ноября 2026 г.`"
     )
     await state.set_state(ContractForm.date)
 
@@ -313,29 +331,54 @@ async def contract_step_num(message: Message, state: FSMContext):
 async def contract_step_date(message: Message, state: FSMContext):
     d_text = message.text.strip()
     if d_text.lower() == "сегодня":
-        d_text = datetime.datetime.now().strftime("«%d» %m %Y г.")
+        months_ru = {
+            1: "января", 2: "февраля", 3: "марта", 4: "апреля",
+            5: "мая", 6: "июня", 7: "июля", 8: "августа",
+            9: "сентября", 10: "октября", 11: "ноября", 12: "декабря"
+        }
+        now = datetime.datetime.now()
+        d_text = f"«{now.day:02d}» {months_ru[now.month]} {now.year} г."
     await state.update_data(date=d_text)
-    
-    await message.answer(
-        "Шаг 3 из 7: Введите **полное наименование компании Дилера / Покупателя**:\n\n"
-        "*Пример:* `ООО «Мосводопром»` или `ИП Иванов Иван Иванович`"
-    )
+
+    data = await state.get_data()
+    if data.get("is_fiz"):
+        await message.answer(
+            "Шаг 3: Введите **полное ФИО Дилера (физлица)**:\n\n"
+            "*Пример:* `Болталина Карина Николаевна`"
+        )
+    else:
+        await message.answer(
+            "Шаг 3: Введите **полное наименование компании Дилера / ИП**:\n\n"
+            "*Пример:* `ООО «Мосводопром»` или `ИП Иванов Иван Иванович`"
+        )
     await state.set_state(ContractForm.dealer_name)
 
 @dp.message(ContractForm.dealer_name)
 async def contract_step_name(message: Message, state: FSMContext):
     await state.update_data(dealer_name=message.text.strip())
-    await message.answer(
-        "Шаг 4 из 7: Введите **должность, ФИО руководителя и основание** (для первой страницы):\n\n"
-        "*Пример:* `в лице Генерального директора Иванова И.И., действующего на основании Устава`"
-    )
-    await state.set_state(ContractForm.preamble)
+    data = await state.get_data()
+    if data.get("is_fiz"):
+        await state.update_data(preamble="")
+        await message.answer(
+            "Шаг 4: Введите **фамилию и инициалы для подписи**:\n\n"
+            "*Пример:* `Болталина К.Н.`"
+        )
+        await state.set_state(ContractForm.fio_short)
+    else:
+        await message.answer(
+            "Шаг 4: Введите **должность, ФИО руководителя и основание** (или `-`, если не требуется):\n\n"
+            "*Пример:* `в лице Генерального директора Иванова И.И., действующего на основании Устава`"
+        )
+        await state.set_state(ContractForm.preamble)
 
 @dp.message(ContractForm.preamble)
 async def contract_step_preamble(message: Message, state: FSMContext):
-    await state.update_data(preamble=message.text.strip())
+    p_text = message.text.strip()
+    if p_text in ["-", "—", "нет"]:
+        p_text = ""
+    await state.update_data(preamble=p_text)
     await message.answer(
-        "Шаг 5 из 7: Введите **фамилию и инициалы руководителя для подписи**:\n\n"
+        "Шаг 5: Введите **фамилию и инициалы руководителя для подписи**:\n\n"
         "*Пример:* `Иванов И.И.`"
     )
     await state.set_state(ContractForm.fio_short)
@@ -343,13 +386,71 @@ async def contract_step_preamble(message: Message, state: FSMContext):
 @dp.message(ContractForm.fio_short)
 async def contract_step_fio(message: Message, state: FSMContext):
     await state.update_data(fio_short=message.text.strip())
-    await message.answer(
-        "Шаг 6 из 7: Введите **юридический адрес** и **ИНН/КПП** (через символ `/` или с новой строки):\n\n"
-        "*Пример:*\n"
-        "111524, г. Москва, ул. Электродная, д. 11\n"
-        "7721023832 / 772101001"
-    )
-    await state.set_state(ContractForm.address)
+    data = await state.get_data()
+
+    if data.get("is_fiz"):
+        await message.answer(
+            "Шаг 5: Введите **паспортные данные, адрес регистрации и телефон** (каждый пункт с новой строки):\n\n"
+            "1. Серия и номер паспорта\n"
+            "2. Дата выдачи\n"
+            "3. Кем выдан (и код подразделения)\n"
+            "4. Адрес регистрации\n"
+            "5. Контактный телефон\n\n"
+            "*Пример:*\n"
+            "4616 № 411340\n"
+            "07.12.2016г.\n"
+            "МП №2 Межрайонного ОУФМС России по Московской области, 500-135\n"
+            "г. Москва, ул. Барвихинская, д. 6, кв. 197\n"
+            "+7 978 726 86 43"
+        )
+        await state.set_state(ContractForm.fiz_passport)
+    else:
+        await message.answer(
+            "Шаг 6: Введите **юридический адрес** и **ИНН/КПП** (с новой строки):\n\n"
+            "*Пример:*\n"
+            "111524, г. Москва, ул. Электродная, д. 11\n"
+            "7721023832 / 772101001"
+        )
+        await state.set_state(ContractForm.address)
+
+@dp.message(ContractForm.fiz_passport)
+async def contract_step_fiz_finish(message: Message, state: FSMContext):
+    lines = [l.strip() for l in message.text.split("\n") if l.strip()]
+    p_ser_num = lines[0] if len(lines) > 0 else "—"
+    p_date = lines[1] if len(lines) > 1 else "—"
+    p_by = lines[2] if len(lines) > 2 else "—"
+    p_addr = lines[3] if len(lines) > 3 else "—"
+    p_phone = lines[4] if len(lines) > 4 else "—"
+
+    data = await state.get_data()
+    await state.clear()
+
+    custom_req_lines = [
+        data["dealer_name"],
+        "Паспортные данные:",
+        f"Серия, номер: {p_ser_num}",
+        f"Дата выдачи: {p_date}",
+        f"Кем выдан: {p_by}",
+        "Адрес и дата регистрации по месту жительства:",
+        p_addr,
+        f"Контактный телефон: {p_phone}"
+    ]
+
+    await message.answer("⏳ Создаю 10-страничный Дилерский договор...", reply_markup=main_keyboard)
+
+    try:
+        pdf_buf = generate_diler_contract(
+            contract_num=data["number"],
+            contract_date=data["date"],
+            dealer_name=data["dealer_name"],
+            dealer_preamble=data["preamble"],
+            dealer_fio_short=data["fio_short"],
+            custom_req_lines=custom_req_lines
+        )
+        doc_file = BufferedInputFile(pdf_buf.getvalue(), filename=f"Дилерский_договор_№{data['number']}_{data['dealer_name']}.pdf")
+        await message.answer_document(doc_file, caption=f"✅ Дилерский договор №{data['number']} успешно оформлен на всех 10 страницах!")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка при формировании договора: {e}", reply_markup=main_keyboard)
 
 @dp.message(ContractForm.address)
 async def contract_step_addr(message: Message, state: FSMContext):
@@ -358,14 +459,13 @@ async def contract_step_addr(message: Message, state: FSMContext):
         addr = lines[0]
         inn_kpp = lines[1]
     else:
-        # Если введено одной строкой через запятую
         parts = message.text.split(",")
         addr = ",".join(parts[:-1]).strip() if len(parts) > 1 else parts[0].strip()
         inn_kpp = parts[-1].strip() if len(parts) > 1 else "—"
 
     await state.update_data(address=addr, inn_kpp=inn_kpp)
     await message.answer(
-        "Шаг 7 из 7: Введите **банковские реквизиты и телефон** (каждый пункт с новой строки):\n\n"
+        "Шаг 7: Введите **банковские реквизиты и телефон** (каждый пункт с новой строки):\n\n"
         "1. Расчетный счет\n"
         "2. Корр. счет\n"
         "3. Название банка\n"
@@ -374,9 +474,9 @@ async def contract_step_addr(message: Message, state: FSMContext):
         "*Пример:*\n"
         "40702810438710002682\n"
         "30101810400000000225\n"
-        "ПАО Сбербанк\n"
+        "ПАО СБЕРБАНК, г.Москва\n"
         "044525225\n"
-        "+7(910)009-00-65"
+        "+7(910)-009-00-65"
     )
     await state.set_state(ContractForm.bank_details)
 
@@ -392,7 +492,7 @@ async def contract_step_finish(message: Message, state: FSMContext):
     data = await state.get_data()
     await state.clear()
 
-    await message.answer("⏳ Создаю 11-страничный Дилерский договор...", reply_markup=main_keyboard)
+    await message.answer("⏳ Создаю 10-страничный Дилерский договор...", reply_markup=main_keyboard)
 
     try:
         pdf_buf = generate_diler_contract(
@@ -411,7 +511,7 @@ async def contract_step_finish(message: Message, state: FSMContext):
         )
 
         doc_file = BufferedInputFile(pdf_buf.getvalue(), filename=f"Дилерский_договор_№{data['number']}_{data['dealer_name']}.pdf")
-        await message.answer_document(doc_file, caption=f"✅ Дилерский договор №{data['number']} успешно оформлен во всех 11 страницах!")
+        await message.answer_document(doc_file, caption=f"✅ Дилерский договор №{data['number']} успешно оформлен на всех 10 страницах!")
     except Exception as e:
         await message.answer(f"❌ Ошибка при формировании договора: {e}", reply_markup=main_keyboard)
 
